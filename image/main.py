@@ -12,6 +12,7 @@ from tqdm import tqdm
 
 import utils
 from model import Model
+from linear import Net_linear, train_val_linear
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print('Home device: {}'.format(device))
@@ -36,7 +37,7 @@ def criterion(out_1,out_2,tau_plus,batch_size,beta, estimator):
         # pos score
         pos = torch.exp(torch.sum(out_1 * out_2, dim=-1) / temperature)
         pos = torch.cat([pos, pos], dim=0)
-        
+
         # negative samples similarity scoring
         if estimator=='hard':
             N = batch_size * 2 - 2
@@ -49,7 +50,7 @@ def criterion(out_1,out_2,tau_plus,batch_size,beta, estimator):
             Ng = neg.sum(dim=-1)
         else:
             raise Exception('Invalid estimator selected. Please use any of [hard, easy]')
-            
+
         # contrastive loss
         loss = (- torch.log(pos / (pos + Ng) )).mean()
 
@@ -58,7 +59,7 @@ def criterion(out_1,out_2,tau_plus,batch_size,beta, estimator):
 def train(net, data_loader, train_optimizer, temperature, estimator, tau_plus, beta):
     net.train()
     total_loss, total_num, train_bar = 0.0, 0, tqdm(data_loader)
-    for pos_1, pos_2, target in train_bar:
+    for pos_1, pos_2, _ in train_bar:
         pos_1, pos_2 = pos_1.to(device,non_blocking=True), pos_2.to(device,non_blocking=True)
         feature_1, out_1 = net(pos_1)
         feature_2, out_2 = net(pos_2)
@@ -90,9 +91,9 @@ def test(net, memory_data_loader, test_data_loader):
         feature_bank = torch.cat(feature_bank, dim=0).t().contiguous()
         # [N]
         if 'cifar' in dataset_name:
-            feature_labels = torch.tensor(memory_data_loader.dataset.targets, device=feature_bank.device) 
+            feature_labels = torch.tensor(memory_data_loader.dataset.targets, device=feature_bank.device)
         elif 'stl' in dataset_name:
-            feature_labels = torch.tensor(memory_data_loader.dataset.labels, device=feature_bank.device) 
+            feature_labels = torch.tensor(memory_data_loader.dataset.labels, device=feature_bank.device)
 
         # loop test data to predict the label by weighted knn search
         test_bar = tqdm(test_data_loader)
@@ -125,6 +126,11 @@ def test(net, memory_data_loader, test_data_loader):
     return total_top1 / total_num * 100, total_top5 / total_num * 100
 
 
+
+
+
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train SimCLR')
     parser.add_argument('--root', type=str, default='../data', help='Path to data directory')
@@ -154,7 +160,7 @@ if __name__ == '__main__':
         betas=iter(np.linspace(beta,0,n_steps))
     else:
         do_beta_anneal=False
-    
+
     # data prepare
     train_data, memory_data, test_data = utils.get_dataset(dataset_name, root=args.root)
 
@@ -163,7 +169,11 @@ if __name__ == '__main__':
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=12, pin_memory=True)
 
     # model setup and optimizer config
-    model = Model(feature_dim).to(device)
+    if dataset_name in ['imagenet100']:
+        original_resnet = True
+    else:
+        original_resnet = False
+    model = Model(feature_dim, original_resnet=original_resnet).to(device)
     model = nn.DataParallel(model)
 
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-6)
@@ -171,16 +181,16 @@ if __name__ == '__main__':
     print('# Classes: {}'.format(c))
 
     # training loop
-    os.makedirs('../results/{}'.format(dataset_name))
+    os.makedirs('../results/{}'.format(dataset_name), exist_ok=True)
 
     for epoch in range(1, epochs + 1):
         train_loss = train(model, train_loader, optimizer, temperature, estimator, tau_plus, beta)
-        
+
         if do_beta_anneal is True:
             if epoch % (int(epochs/n_steps)) == 0:
                 beta=next(betas)
 
-        if epoch % 100 == 0:
+        if epoch % 20 == 0:
             test_acc_1, test_acc_5 = test(model, memory_loader, test_loader)
             if do_beta_anneal is True:
                 torch.save(model.state_dict(), '../results/{}/{}_{}_model_{}_{}_{}_{}_{}.pth'.format(dataset_name,dataset_name,estimator,batch_size,tau_plus,beta,epoch,anneal))

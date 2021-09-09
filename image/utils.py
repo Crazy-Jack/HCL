@@ -1,9 +1,12 @@
+import os
+
 from PIL import Image
+import torchvision
 from torchvision import transforms
 from torchvision.datasets import STL10
 from torchvision.datasets import CIFAR10, CIFAR100
 
-from random import sample 
+from random import sample
 import cv2
 import numpy as np
 
@@ -15,7 +18,7 @@ class CIFAR10Pair(CIFAR10):
         if self.transform is not None:
             pos_1 = self.transform(img)
             pos_2 = self.transform(img)
- 
+
         if self.target_transform is not None:
             target = self.target_transform(target)
 
@@ -24,7 +27,7 @@ class CIFAR10Pair(CIFAR10):
 
 class CIFAR100Pair_true_label(CIFAR100):
     #dataloader where pairs of positive samples are randomly sampled from pairs
-    #of inputs with the same label. 
+    #of inputs with the same label.
     def __init__(self, root='../data', train=True, transform=None):
         super().__init__(root=root, train=train, transform=transform)
         def get_labels(i):
@@ -44,7 +47,7 @@ class CIFAR100Pair_true_label(CIFAR100):
         if self.transform is not None:
             pos_1 = self.transform(img1)
             pos_2 = self.transform(img2)
- 
+
         if self.target_transform is not None:
             target = self.target_transform(target)
 
@@ -58,7 +61,7 @@ class CIFAR100Pair(CIFAR100):
         if self.transform is not None:
             pos_1 = self.transform(img)
             pos_2 = self.transform(img)
- 
+
         if self.target_transform is not None:
             target = self.target_transform(target)
 
@@ -75,6 +78,28 @@ class STL10Pair(STL10):
             pos_2 = self.transform(img)
 
         return pos_1, pos_2, target
+
+
+class ImageFolderBiaugment(torchvision.datasets.ImageFolder):
+
+    def __getitem__(self, index):
+        """
+        Args:
+            index (int): Index
+        Returns:
+            tuple: (sample, target) where target is class_index of the target class.
+        """
+        path, target = self.samples[index]
+        sample = self.loader(path)
+        if self.transform is not None:
+            img = self.transform(sample)
+            img2 = self.transform(sample)
+        else:
+            img2 = img = sample
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return img, img2, target
 
 
 class GaussianBlur(object):
@@ -95,22 +120,37 @@ class GaussianBlur(object):
             sample = cv2.GaussianBlur(sample, (self.kernel_size, self.kernel_size), sigma)
 
         return sample
+def get_transforms(dataset_name):
+    if dataset_name in ['imagenet100']:
+        train_transform = transforms.Compose([
+            transforms.RandomResizedCrop(224),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
+            GaussianBlur(kernel_size=int(0.1 * 32)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
 
+        test_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+    else:
+        train_transform = transforms.Compose([
+            transforms.RandomResizedCrop(32),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
+            GaussianBlur(kernel_size=int(0.1 * 32)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
 
-train_transform = transforms.Compose([
-    transforms.RandomResizedCrop(32),
-    transforms.RandomHorizontalFlip(p=0.5),
-    transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
-    transforms.RandomGrayscale(p=0.2),
-    GaussianBlur(kernel_size=int(0.1 * 32)),
-    transforms.ToTensor(),
-    transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
-
-test_transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
+        test_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
+    return train_transform, test_transform
 
 def get_dataset(dataset_name, root='../data', pair=True):
+    train_transform, test_transform = get_transforms(dataset_name)
     if pair:
         if dataset_name=='cifar10':
             train_data = CIFAR10Pair(root=root, train=True, transform=train_transform)
@@ -128,6 +168,10 @@ def get_dataset(dataset_name, root='../data', pair=True):
             train_data = CIFAR100Pair_true_label(root=root, train=True, transform=train_transform)
             memory_data = CIFAR100Pair_true_label(root=root, train=True, transform=test_transform)
             test_data = CIFAR100Pair_true_label(root=root, train=False, transform=test_transform)
+        elif dataset_name in ['imagenet100']:
+            train_data = ImageFolderBiaugment(root=os.path.join(root, 'train'), transform=train_transform)
+            memory_data = ImageFolderBiaugment(root=os.path.join(root, 'train'), transform=test_transform)
+            test_data = ImageFolderBiaugment(root=os.path.join(root, 'val'), transform=test_transform)
         else:
             raise Exception('Invalid dataset name')
     else:
@@ -147,4 +191,4 @@ def get_dataset(dataset_name, root='../data', pair=True):
             raise Exception('Invalid dataset name')
 
     return train_data, memory_data, test_data
-        
+

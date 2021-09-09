@@ -14,9 +14,9 @@ from model import Model
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print('Home device: {}'.format(device))
 
-class Net(nn.Module):
+class Net_linear(nn.Module):
     def __init__(self, num_class, pretrained_path):
-        super(Net, self).__init__()
+        super(Net_linear, self).__init__()
 
         # encoder
         model = Model().to(device)
@@ -35,7 +35,7 @@ class Net(nn.Module):
 
 
 # train or test for one epoch
-def train_val(net, data_loader, train_optimizer):
+def train_val_linear(net, data_loader, train_optimizer):
     is_train = train_optimizer is not None
     net.train() if is_train else net.eval()
 
@@ -76,13 +76,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
     model_path, batch_size, epochs = args.model_path, args.batch_size, args.epochs
     dataset_name = args.dataset_name
-    
+
     train_data, _, test_data = utils.get_dataset(dataset_name, root=args.root, pair=False)
 
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True)
 
-    model = Net(num_class=len(train_data.classes), pretrained_path=model_path).to(device)
+    model = Net_linear(num_class=len(train_data.classes), pretrained_path=model_path).to(device)
     for param in model.f.parameters():
         param.requires_grad = False
     model = nn.DataParallel(model)
@@ -93,9 +93,9 @@ if __name__ == '__main__':
                'test_loss': [], 'test_acc@1': [], 'test_acc@5': []}
 
     for epoch in range(1, epochs + 1):
-        train_loss, train_acc_1, train_acc_5 = train_val(model, train_loader, optimizer)
+        train_loss, train_acc_1, train_acc_5 = train_val_linear(model, train_loader, optimizer)
         if epoch % 5 == 0:
-            test_loss, test_acc_1, test_acc_5 = train_val(model, test_loader, None)
+            test_loss, test_acc_1, test_acc_5 = train_val_linear(model, test_loader, None)
 
             os.makedirs('../results/')
             try:
